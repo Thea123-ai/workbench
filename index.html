@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="zh-CN"><!-- v10-weekly-sync-complete -->
+<html lang="zh-CN"><!-- v11-target-sync-fix -->
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
@@ -1069,6 +1069,10 @@ function logWeight(dateKey, weight) {
 function rebuildFitnessChart() {
   const mod = modules.find(m => m.id === 'fitness');
   if (!mod) return;
+  // Sync chartTarget from stats (covers init case where recalcModuleProgress hasn't run)
+  const tgtW = parseFloat(mod.stats[1]?.val) || 0;
+  if (tgtW > 0) mod.chartTarget = tgtW;
+
   const log = getWeightLog();
   const monday = getMonday(new Date());
   const dayNames = ['周一','周二','周三','周四','周五','周六','周日'];
@@ -1081,24 +1085,24 @@ function rebuildFitnessChart() {
     data.push(val !== undefined ? val : null);
     labels.push(dayNames[i]);
   }
-  // Fill gaps with nearest known values
-  for (let i = 0; i < 7; i++) {
+  // Remove leading trailing nulls — only keep days with real data
+  while (data.length > 0 && data[0] === null) { data.shift(); labels.shift(); }
+  while (data.length > 0 && data[data.length - 1] === null) { data.pop(); labels.pop(); }
+
+  // If there are still gaps in the middle (e.g. Tue recorded, Thu recorded, Wed is null),
+  // fill them with interpolation so the line connects properly
+  for (let i = 0; i < data.length; i++) {
     if (data[i] !== null) continue;
     let before = i - 1, after = i + 1;
     while (before >= 0 && data[before] === null) before--;
-    while (after < 7 && data[after] === null) after++;
-    if (before >= 0 && after < 7) {
+    while (after < data.length && data[after] === null) after++;
+    if (before >= 0 && after < data.length) {
       data[i] = Math.round((data[before] + data[after]) / 2 * 10) / 10;
-    } else if (before >= 0) {
-      data[i] = data[before];
-    } else if (after < 7) {
-      data[i] = data[after];
     }
+    // Do NOT fill edge nulls (already removed above) — single-day
+    // data points should not get expanded to fill the whole week
   }
-  // Remove leading/trailing nulls
-  while (data.length > 0 && data[0] === null) { data.shift(); labels.shift(); }
-  while (data.length > 0 && data[data.length - 1] === null) { data.pop(); labels.pop(); }
-  mod.chartData = data.length > 0 ? data : [58.5];
+  mod.chartData = data.length > 0 ? data : [parseFloat(mod.stats[0]?.val) || 58.5];
   mod.chartLabels = data.length > 0 ? labels : ['今日'];
   saveModules();
 }
