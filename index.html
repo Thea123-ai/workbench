@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="zh-CN"><!-- v4 -->
+<html lang="zh-CN"><!-- v5-persistence-fix -->
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
@@ -905,6 +905,7 @@ function deleteJobPosition(posId) {
   const mod = modules.find(m => m.id === 'job');
   if (mod) mod._viewingPosition = null;
   refreshJobStats();
+  buildLeftPanel();
   calcWeeklySummary();
   renderDetail(modules.findIndex(m => m.id === 'job'));
 }
@@ -1248,25 +1249,29 @@ const iconMap = {
 
 // Load from localStorage
 function loadModules() {
+  // Always start with a deep copy of defaults (NEVER mutate defaultModules)
+  const result = JSON.parse(JSON.stringify(defaultModules));
   const saved = localStorage.getItem('workbench_custom_modules');
   if (saved) {
     try {
       const custom = JSON.parse(saved);
-      // Merge: builtin modules + saved custom (preserving item states)
-      const builtins = defaultModules.map(b => {
-        const savedMod = custom.find(c => c.id === b.id);
+      if (!Array.isArray(custom)) throw new Error('invalid data');
+      // Full merge: saved data overwrites defaults for matching IDs
+      result.forEach(def => {
+        const savedMod = custom.find(c => c.id === def.id);
         if (savedMod) {
-          b.items = savedMod.items || b.items;
-          b.progress = savedMod.progress !== undefined ? savedMod.progress : b.progress;
-          if (b.id === 'account' && savedMod._monthlyIncome !== undefined) b._monthlyIncome = savedMod._monthlyIncome;
+          // Deep-merge: copy ALL enumerable own properties from saved into def
+          for (const key of Object.keys(savedMod)) {
+            def[key] = savedMod[key];
+          }
         }
-        return b;
       });
-      const extraCustom = custom.filter(c => !defaultModules.find(b => b.id === c.id));
-      return [...builtins, ...extraCustom];
-    } catch(e) {}
+      // Append custom (non-builtin) modules that user added
+      const extraCustom = custom.filter(c => !result.find(r => r.id === c.id));
+      result.push(...extraCustom);
+    } catch(e) { console.warn('loadModules: using defaults, error:', e.message); }
   }
-  return JSON.parse(JSON.stringify(defaultModules));
+  return result;
 }
 
 function saveModules() {
@@ -2006,6 +2011,7 @@ function toggleItem(modId, itemIdx) {
   mod.items[itemIdx].done = !mod.items[itemIdx].done;
   recalcModuleProgress(mod);
   saveModules();
+  buildLeftPanel();
   calcWeeklySummary();
   renderDetail(modules.findIndex(m => m.id === modId));
 }
@@ -2050,6 +2056,7 @@ function finishEditStat(modId, statIdx, input) {
   mod.stats[statIdx].val = newVal;
   recalcModuleProgress(mod);
   saveModules();
+  buildLeftPanel();
   calcWeeklySummary();
 }
 
@@ -2067,6 +2074,7 @@ function addTodoItem(modId) {
   input.value = '';
   recalcModuleProgress(mod);
   saveModules();
+  buildLeftPanel();
   calcWeeklySummary();
   renderDetail(modules.findIndex(m => m.id === modId));
   // Re-focus input after re-render
@@ -2083,6 +2091,7 @@ function deleteTodoItem(modId, itemIdx) {
   mod.items.splice(itemIdx, 1);
   recalcModuleProgress(mod);
   saveModules();
+  buildLeftPanel();
   calcWeeklySummary();
   renderDetail(modules.findIndex(m => m.id === modId));
 }
