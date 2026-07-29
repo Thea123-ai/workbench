@@ -1,0 +1,11 @@
+{
+  "name": "Thea个人工作台",
+  "short_name": "个人工作台",
+  "description": "每日计划、新闻、英语学习、身材管理、记账、找工作、每周小结",
+  "start_url": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#FFE0E6",
+  "theme_color": "#FF6B8A",
+  "icons": []
+}
