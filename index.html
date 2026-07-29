@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="zh-CN"><!-- v7-fitness-account-fix -->
+<html lang="zh-CN"><!-- v8-weekly-summary-fix -->
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
@@ -1281,6 +1281,9 @@ function calcWeeklySummary() {
   try {
   let totalItems = 0, doneItems = 0;
   const breakdown = [];
+  const thisMonday = getMonday(new Date());
+  const thisKey = thisMonday.toISOString().slice(0, 10);
+  const weekEnd = new Date(thisMonday); weekEnd.setDate(weekEnd.getDate() + 7);
 
   modules.forEach(mod => {
     if (mod.id === 'summary') return;
@@ -1289,21 +1292,23 @@ function calcWeeklySummary() {
 
     if (mod.id === 'english') {
       const h = getEnglishHistory();
-      if (h) {
+      if (h && h.date >= thisKey) {
         total = h.wordIndices.length + h.speakingIndices.length;
         done = (h.wordDone || []).length + (h.speakingDone || []).length;
       }
     } else if (mod.id === 'news') {
       const h = getNewsHistory();
-      if (h) {
+      if (h && h.date >= thisKey) {
         total = h.indices.length;
         done = (h.read || []).length;
       }
     } else if (mod.id === 'job') {
       const store = getJobStore();
       store.forEach(p => {
-        total += p.stages.length;
-        done += p.stages.filter(s => s.done).length;
+        // Only count stages with dates within this week
+        const weekStages = p.stages.filter(s => s.date && new Date(s.date) >= thisMonday && new Date(s.date) < weekEnd);
+        total += weekStages.length;
+        done += weekStages.filter(s => s.done).length;
       });
     } else if (mod.items) {
       total = mod.items.length;
@@ -1323,19 +1328,44 @@ function calcWeeklySummary() {
     summaryMod.stats = [{ val: doneItems + '/' + totalItems, label: '完成任务' }, { val: pct + '%', label: '完成率' }];
     summaryMod.progress = pct;
     summaryMod._breakdown = breakdown;
+
+    // Build weekly chart modules (only include modules with actual weekly chart data)
+    summaryMod._chartModules = [];
+    const newsMod = modules.find(m => m.id === 'news');
+    if (newsMod && newsMod.chartData && newsMod.chartData.length > 0 && newsMod.chartData.some(d => d.value > 0)) {
+      summaryMod._chartModules.push({
+        id: 'news', name: '每日新闻', chart: 'pie',
+        chartData: JSON.parse(JSON.stringify(newsMod.chartData)),
+        chartTitle: '本周新闻类别分布'
+      });
+    }
+    const accountMod = modules.find(m => m.id === 'account');
+    if (accountMod && accountMod.chartData && accountMod.chartData.length > 0 && accountMod.chartData.some(d => d.value > 0)) {
+      summaryMod._chartModules.push({
+        id: 'account', name: '每日记账', chart: 'pie',
+        chartData: JSON.parse(JSON.stringify(accountMod.chartData)),
+        chartTitle: '本周支出分类分布'
+      });
+    }
+    const fitnessMod = modules.find(m => m.id === 'fitness');
+    if (fitnessMod && fitnessMod.chartData && fitnessMod.chartData.length > 0) {
+      summaryMod._chartModules.push({
+        id: 'fitness', name: '身材管理', chart: 'line',
+        chartData: [...fitnessMod.chartData],
+        chartLabels: fitnessMod.chartLabels ? [...fitnessMod.chartLabels] : null,
+        chartTarget: fitnessMod.chartTarget
+      });
+    }
   }
 
   // Auto-save weekly snapshot
-  const monday = getMonday(new Date());
-  const key = monday.toISOString().slice(0, 10);
   let snapshots = getWeeklySnapshots();
-  snapshots[key] = {
-    weekLabel: getWeekLabel(monday),
+  snapshots[thisKey] = {
+    weekLabel: getWeekLabel(thisMonday),
     totalItems, doneItems, pct, breakdown,
     quizScores: getWeeklyQuizScores(),
     jobStats: getWeeklyJobStats(),
-    chartData: modules.filter(m => m.id !== 'summary' && m.id !== 'english' && m.chart && m.chartData)
-      .map(m => ({ id: m.id, chart: m.chart, chartData: JSON.parse(JSON.stringify(m.chartData)), chartLabels: m.chartLabels, chartTarget: m.chartTarget }))
+    chartData: (summaryMod && summaryMod._chartModules) ? JSON.parse(JSON.stringify(summaryMod._chartModules)) : []
   };
   saveWeeklySnapshots(snapshots);
   } catch(e) { console.warn('calcWeeklySummary error:', e); }
@@ -1361,16 +1391,19 @@ function renderPieChart(mod) {
     paths += `<path d="M${cx},${cy} L${x1},${y1} A${R},${R} 0 ${large} 1 ${x2},${y2} Z" fill="${d.color}" opacity="0.9"/>`;
     angle += slice;
   });
+  const isMoney = mod.id === 'account';
+  const prefix = isMoney ? '¥' : '';
+  const centerLabel = isMoney ? '总支出' : '总条数';
   const legend = data.map(d =>
-    `<div class="legend-item"><div class="legend-dot" style="background:${d.color}"></div>${d.name} ¥${d.value}</div>`
+    `<div class="legend-item"><div class="legend-dot" style="background:${d.color}"></div>${d.name} ${prefix}${d.value}</div>`
   ).join('');
   return `<div class="chart-container">
     <div class="chart-title">${title}</div>
     <div style="display:flex;align-items:center;justify-content:center;">
       <svg viewBox="0 0 ${W} ${H}" style="width:160px;height:160px;">
         ${paths}
-        <text x="${cx}" y="${cy - 4}" text-anchor="middle" class="chart-tooltip" font-size="14" fill="#FF6B8A" font-weight="700">¥${total}</text>
-        <text x="${cx}" y="${cy + 14}" text-anchor="middle" class="chart-axis">总支出</text>
+        <text x="${cx}" y="${cy - 4}" text-anchor="middle" class="chart-tooltip" font-size="14" fill="#FF6B8A" font-weight="700">${prefix}${total}</text>
+        <text x="${cx}" y="${cy + 14}" text-anchor="middle" class="chart-axis">${centerLabel}</text>
       </svg>
     </div>
     <div class="chart-legend">${legend}</div>
@@ -1598,7 +1631,7 @@ function renderDetail(idx) {
       statsData = { val1: mod.stats[0].val, label1: mod.stats[0].label, val2: mod.stats[1].val, label2: mod.stats[1].label, pct: mod.progress };
       quizRows = getWeeklyQuizScores();
       jobStats = getWeeklyJobStats();
-      chartModules = modules.filter(m => m.id !== 'summary' && m.id !== 'english' && m.chart && m.chartData && m.chartData.length > 0);
+      chartModules = mod._chartModules || [];
       weekLabel = '本周 · ' + getWeekLabel(thisMonday);
       mod._breakdown = (calcWeeklySummary(), mod._breakdown);
     } else {
@@ -1609,7 +1642,7 @@ function renderDetail(idx) {
       statsData = { val1: dn + '/' + d, label1: '完成任务', val2: sp + '%', label2: '完成率', pct: sp };
       quizRows = snap.quizScores || [];
       jobStats = snap.jobStats;
-      chartModules = (snap.chartData || []).map(c => ({ id: c.id, chart: c.chart, chartData: c.chartData, chartLabels: c.chartLabels, chartTarget: c.chartTarget }));
+      chartModules = (snap.chartData || []).map(c => ({ id: c.id, chart: c.chart, chartData: c.chartData, chartLabels: c.chartLabels, chartTarget: c.chartTarget, chartTitle: c.chartTitle }));
       weekLabel = snap.weekLabel || vw;
       mod._breakdown = snap.breakdown || [];
     }
