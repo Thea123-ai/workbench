@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="zh-CN"><!-- v6-jobstore-fix -->
+<html lang="zh-CN"><!-- v7-fitness-account-fix -->
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
@@ -2095,6 +2095,19 @@ function deleteTodoItem(modId, itemIdx) {
 function recalcModuleProgress(mod) {
   const total = mod.items.length;
   const done = mod.items.filter(i => i.done).length;
+  // Fitness module: progress = target / current weight ratio
+  if (mod.id === 'fitness') {
+    const curW = parseFloat(mod.stats[0]?.val) || 0;
+    const tgtW = parseFloat(mod.stats[1]?.val) || 0;
+    mod.progress = (curW > 0 && tgtW > 0) ? Math.round(tgtW / curW * 100) : 0;
+    return;
+  }
+  // Account module: dynamic progressSuffix
+  if (mod.id === 'account') {
+    mod.progress = total > 0 ? Math.round(done / total * 100) : 0;
+    mod.progressSuffix = total > 0 ? `${done}/${total} 条` : '0 条';
+    return;
+  }
   mod.progress = total > 0 ? Math.round(done / total * 100) : 0;
   // Update stats if they track todo/done counts
   if (mod.stats.length >= 2) {
