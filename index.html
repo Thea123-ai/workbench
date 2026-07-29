@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="zh-CN"><!-- v11-target-sync-fix -->
+<html lang="zh-CN"><!-- v12-export-import -->
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
@@ -1372,6 +1372,47 @@ function saveModules() {
   localStorage.setItem('workbench_custom_modules', JSON.stringify(modules));
 }
 
+// ---- Export / Import all data ----
+function exportAllData() {
+  const data = {};
+  const keys = ['workbench_custom_modules','job_store','news_daily','english_daily','weekly_snapshots','weight_log','quiz_log','wb_avatar'];
+  keys.forEach(k => {
+    const raw = localStorage.getItem(k);
+    if (raw !== null) data[k] = raw;
+  });
+  const json = JSON.stringify(data, null, 2);
+  const blob = new Blob([json], {type:'application/json'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  const now = new Date();
+  a.download = 'workbench-backup-' + now.getFullYear() + ('0'+(now.getMonth()+1)).slice(-2) + ('0'+now.getDate()).slice(-2) + '.json';
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+function importAllData(e) {
+  const file = e.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = function(ev) {
+    try {
+      const data = JSON.parse(ev.target.result);
+      let count = 0;
+      Object.keys(data).forEach(k => {
+        localStorage.setItem(k, data[k]);
+        count++;
+      });
+      alert('导入成功！已恢复 ' + count + ' 项数据。页面即将刷新...');
+      setTimeout(() => location.reload(), 500);
+    } catch(err) {
+      alert('导入失败：文件格式不正确。请使用工作台导出的 .json 文件。');
+    }
+  };
+  reader.readAsText(file);
+  e.target.value = ''; // Allow re-import same file
+}
+
 let modules = loadModules();
 let currentModule = 0;
 
@@ -1672,6 +1713,14 @@ function buildLeftPanel() {
   addBtn.innerHTML = `+ 自定义模块`;
   addBtn.addEventListener('click', openModal);
   leftPanel.appendChild(addBtn);
+
+  // ---- Export / Import tools ----
+  const tools = document.createElement('div');
+  tools.style.cssText = 'display:flex;gap:6px;padding:10px 8px;justify-content:center;';
+  tools.innerHTML = `<button onclick="exportAllData()" style="background:#FFF0F3;border:1px solid #EDC6D0;color:#FF6B8A;border-radius:6px;padding:5px 10px;font-size:10px;cursor:pointer;flex:1;">📥 导出</button>
+    <button onclick="document.getElementById('importFileInput').click()" style="background:#FFF0F3;border:1px solid #EDC6D0;color:#FF6B8A;border-radius:6px;padding:5px 10px;font-size:10px;cursor:pointer;flex:1;">📤 导入</button>
+    <input type="file" id="importFileInput" accept=".json" style="display:none" onchange="importAllData(event)">`;
+  leftPanel.appendChild(tools);
 }
 
 function selectModule(idx) {
