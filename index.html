@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="zh-CN"><!-- v8-weekly-summary-fix -->
+<html lang="zh-CN"><!-- v9-chart-sync-fix -->
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
@@ -1041,6 +1041,91 @@ function getSnapshotWeeks() {
   return Object.keys(snaps).sort().reverse();
 }
 
+// ---- Weight Log ----
+function getWeightLog() {
+  try { const raw = localStorage.getItem('weight_log'); if (raw) return JSON.parse(raw); } catch(e) {}
+  return {};
+}
+function saveWeightLog(log) { localStorage.setItem('weight_log', JSON.stringify(log)); }
+
+function logWeight(dateKey, weight) {
+  const log = getWeightLog();
+  log[dateKey] = weight;
+  // Keep only last 90 days
+  const keys = Object.keys(log).sort();
+  if (keys.length > 90) keys.slice(0, keys.length - 90).forEach(k => delete log[k]);
+  saveWeightLog(log);
+  rebuildFitnessChart();
+}
+
+function rebuildFitnessChart() {
+  const mod = modules.find(m => m.id === 'fitness');
+  if (!mod) return;
+  const log = getWeightLog();
+  const monday = getMonday(new Date());
+  const dayNames = ['周一','周二','周三','周四','周五','周六','周日'];
+  const data = [];
+  const labels = [];
+  for (let i = 0; i < 7; i++) {
+    const d = new Date(monday); d.setDate(d.getDate() + i);
+    const key = d.toISOString().slice(0, 10);
+    const val = log[key];
+    data.push(val !== undefined ? val : null);
+    labels.push(dayNames[i]);
+  }
+  // Fill gaps with nearest known values
+  for (let i = 0; i < 7; i++) {
+    if (data[i] !== null) continue;
+    let before = i - 1, after = i + 1;
+    while (before >= 0 && data[before] === null) before--;
+    while (after < 7 && data[after] === null) after++;
+    if (before >= 0 && after < 7) {
+      data[i] = Math.round((data[before] + data[after]) / 2 * 10) / 10;
+    } else if (before >= 0) {
+      data[i] = data[before];
+    } else if (after < 7) {
+      data[i] = data[after];
+    }
+  }
+  // Remove leading/trailing nulls
+  while (data.length > 0 && data[0] === null) { data.shift(); labels.shift(); }
+  while (data.length > 0 && data[data.length - 1] === null) { data.pop(); labels.pop(); }
+  mod.chartData = data.length > 0 ? data : [58.5];
+  mod.chartLabels = data.length > 0 ? labels : ['今日'];
+  saveModules();
+}
+
+// ---- Account Expense Chart ----
+function categorizeExpense(text) {
+  // Extract category name from item text
+  const noAmount = text.replace(/(?:¥|￥|CNY\s?)\s*\d+(?:\.\d+)?/g, '').trim();
+  const kw = noAmount.toLowerCase();
+  if (/餐|饭|外卖|零食|奶茶|咖啡|饮料|水$/.test(kw)) return '餐饮';
+  if (/交通|地铁|公交|打车|加油|停车|高铁|火车|机票|出行/.test(kw)) return '交通';
+  if (/购物|淘宝|京东|拼多多|衣服|鞋|包|美妆|护肤|数码|手机/.test(kw)) return '购物';
+  if (/娱乐|电影|游戏|会员|KTV|旅游|景点|门票/.test(kw)) return '娱乐';
+  if (/房租|房贷|水电|煤气|物业|网费|话费/.test(kw)) return '居住';
+  if (/医疗|药|医院|体检|保险/.test(kw)) return '医疗';
+  return '其他';
+}
+function rebuildAccountChart() {
+  const mod = modules.find(m => m.id === 'account');
+  if (!mod) return;
+  const catTotals = {};
+  const catColors = { '餐饮': '#FF6B8A', '交通': '#FA99B3', '购物': '#FFB0C8', '娱乐': '#FFD0DA', '居住': '#FFC1D0', '医疗': '#EDC6D0', '其他': '#E0C3D0' };
+  mod.items.forEach(item => {
+    const amt = parseExpenseAmount(item.text);
+    if (amt <= 0) return;
+    const cat = categorizeExpense(item.text);
+    catTotals[cat] = (catTotals[cat] || 0) + amt;
+  });
+  mod.chartData = Object.entries(catTotals).map(([name, value]) => ({
+    name, value: Math.round(value * 100) / 100,
+    color: catColors[name] || '#E0C3D0'
+  }));
+  saveModules();
+}
+
 // ---- Quiz Logging & Weekly Stats ----
 function getQuizLog() {
   try { const raw = localStorage.getItem('quiz_log'); if (raw) return JSON.parse(raw); } catch(e) {}
@@ -1050,15 +1135,17 @@ function saveQuizLog(log) { localStorage.setItem('quiz_log', JSON.stringify(log)
 function getWeeklyQuizScores() {
   const log = getQuizLog();
   const rows = [];
+  const thisMonday = getMonday(new Date());
+  const thisKey = thisMonday.toISOString().slice(0, 10);
   const dayNames = ['日','一','二','三','四','五','六'];
-  for (let i = 6; i >= 0; i--) {
-    const d = new Date(); d.setDate(d.getDate() - i);
+  // Only include days within this week (Mon-Sun)
+  for (let i = 0; i < 7; i++) {
+    const d = new Date(thisMonday); d.setDate(d.getDate() + i);
     const key = d.toISOString().slice(0, 10);
-    const dayLabel = (i === 0 ? '今天' : '周' + dayNames[d.getDay()]) + ' ' + key.slice(5);
-    if (log[key]) {
+    if (d > new Date()) continue; // Skip future days
+    const dayLabel = (d.toDateString() === new Date().toDateString() ? '今天' : '周' + dayNames[d.getDay()]) + ' ' + key.slice(5);
+    if (log[key] && log[key].total > 0) {
       rows.push({ day: dayLabel, score: log[key].score, total: log[key].total });
-    } else {
-      rows.push({ day: dayLabel, score: 0, total: 0 });
     }
   }
   return rows;
@@ -1275,6 +1362,10 @@ function saveModules() {
 
 let modules = loadModules();
 let currentModule = 0;
+
+// Rebuild charts from stored data on init
+rebuildFitnessChart();
+rebuildAccountChart();
 
 // ---- Calculate Weekly Summary ----
 function calcWeeklySummary() {
@@ -2038,6 +2129,7 @@ function toggleItem(modId, itemIdx) {
   if (!mod) return;
   mod.items[itemIdx].done = !mod.items[itemIdx].done;
   recalcModuleProgress(mod);
+  if (modId === 'account') rebuildAccountChart();
   saveModules();
   buildLeftPanel();
   calcWeeklySummary();
@@ -2082,6 +2174,11 @@ function finishEditStat(modId, statIdx, input) {
   const mod = modules.find(m => m.id === modId);
   if (!mod) return;
   mod.stats[statIdx].val = newVal;
+  // Log weight for fitness module (statIdx 0 = current weight)
+  if (modId === 'fitness' && statIdx === 0) {
+    const today = new Date().toISOString().slice(0, 10);
+    logWeight(today, parseFloat(newVal));
+  }
   recalcModuleProgress(mod);
   saveModules();
   buildLeftPanel();
@@ -2101,6 +2198,7 @@ function addTodoItem(modId) {
   mod.items.push({ text, done: false });
   input.value = '';
   recalcModuleProgress(mod);
+  if (modId === 'account') rebuildAccountChart();
   saveModules();
   buildLeftPanel();
   calcWeeklySummary();
@@ -2118,6 +2216,7 @@ function deleteTodoItem(modId, itemIdx) {
   if (!mod) return;
   mod.items.splice(itemIdx, 1);
   recalcModuleProgress(mod);
+  if (modId === 'account') rebuildAccountChart();
   saveModules();
   buildLeftPanel();
   calcWeeklySummary();
