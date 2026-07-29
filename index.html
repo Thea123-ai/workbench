@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="zh-CN"><!-- v9-chart-sync-fix -->
+<html lang="zh-CN"><!-- v10-weekly-sync-complete -->
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
@@ -1041,6 +1041,14 @@ function getSnapshotWeeks() {
   return Object.keys(snaps).sort().reverse();
 }
 
+// ---- Local Date Helper (avoids UTC date mismatch) ----
+function fmtLocalDate(d) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
 // ---- Weight Log ----
 function getWeightLog() {
   try { const raw = localStorage.getItem('weight_log'); if (raw) return JSON.parse(raw); } catch(e) {}
@@ -1068,7 +1076,7 @@ function rebuildFitnessChart() {
   const labels = [];
   for (let i = 0; i < 7; i++) {
     const d = new Date(monday); d.setDate(d.getDate() + i);
-    const key = d.toISOString().slice(0, 10);
+    const key = fmtLocalDate(d);
     const val = log[key];
     data.push(val !== undefined ? val : null);
     labels.push(dayNames[i]);
@@ -1141,7 +1149,7 @@ function getWeeklyQuizScores() {
   // Only include days within this week (Mon-Sun)
   for (let i = 0; i < 7; i++) {
     const d = new Date(thisMonday); d.setDate(d.getDate() + i);
-    const key = d.toISOString().slice(0, 10);
+    const key = fmtLocalDate(d);
     if (d > new Date()) continue; // Skip future days
     const dayLabel = (d.toDateString() === new Date().toDateString() ? '今天' : '周' + dayNames[d.getDay()]) + ' ' + key.slice(5);
     if (log[key] && log[key].total > 0) {
@@ -1292,7 +1300,7 @@ function finishQuiz() {
   if (h) { h.quizScore = score; h.quizTotal = total; saveEnglishHistory(h); }
 
   // Save to weekly quiz log
-  const today = new Date().toISOString().slice(0, 10);
+  const today = fmtLocalDate(new Date());
   let quizLog = getQuizLog();
   quizLog[today] = { score, total, pct: Math.round(score/total*100) };
   saveQuizLog(quizLog);
@@ -1511,11 +1519,14 @@ function renderLineChart(mod) {
   const min = Math.min(...data, target || Infinity) - 0.5;
   const max = Math.max(...data, target || 0) + 0.5;
   const y = v => padT + plotH * (1 - (v - min) / (max - min));
-  const x = i => padL + plotW * i / (data.length - 1);
+  const x = i => data.length > 1 ? padL + plotW * i / (data.length - 1) : padL + plotW / 2;
 
-  let points = data.map((v, i) => `${x(i)},${y(v)}`).join(' ');
-  let areaPath = `M${x(0)},${y(min)} L${points} L${x(data.length-1)},${y(min)} Z`;
-  let linePath = `M${points}`;
+  let linePath = '', areaPath = '';
+  if (data.length > 1) {
+    let points = data.map((v, i) => `${x(i)},${y(v)}`).join(' ');
+    areaPath = `M${x(0)},${y(min)} L${points} L${x(data.length-1)},${y(min)} Z`;
+    linePath = `M${points}`;
+  }
 
   // Y axis labels
   const yTicks = [Math.round(min * 10) / 10, Math.round((min + max) / 2 * 10) / 10, Math.round(max * 10) / 10];
@@ -1532,7 +1543,14 @@ function renderLineChart(mod) {
   }
 
   // Dot points
-  let dots = data.map((v, i) => `<circle cx="${x(i)}" cy="${y(v)}" r="4" fill="#FF6B8A" stroke="#fff" stroke-width="2"/>`).join('');
+  let dots = data.map((v, i) => `<circle cx="${x(i)}" cy="${y(v)}" r="5" fill="#FF6B8A" stroke="#fff" stroke-width="2"/>`).join('');
+
+  // Single-point card: show value prominently
+  let singleBadge = '';
+  if (data.length === 1) {
+    const pcy = y(data[0]);
+    singleBadge = `<text x="${x(0)}" y="${pcy - 14}" text-anchor="middle" class="chart-tooltip" font-weight="700" font-size="13" fill="#FF6B8A">${data[0]}kg</text>`;
+  }
 
   return `<div class="chart-container">
     <div class="chart-title">本周体重趋势 (kg)</div>
@@ -1540,8 +1558,9 @@ function renderLineChart(mod) {
       ${yLabels}
       ${xLabels}
       ${target ? targetLine : ''}
-      <path d="${areaPath}" fill="url(#areaGrad)" opacity="0.3"/>
-      <path d="${linePath}" fill="none" stroke="#FF6B8A" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+      ${areaPath ? `<path d="${areaPath}" fill="url(#areaGrad)" opacity="0.3"/>` : ''}
+      ${linePath ? `<path d="${linePath}" fill="none" stroke="#FF6B8A" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>` : ''}
+      ${singleBadge}
       ${dots}
       <defs><linearGradient id="areaGrad" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#FF6B8A"/><stop offset="100%" stop-color="#FF6B8A" stop-opacity="0"/></linearGradient></defs>
     </svg>
@@ -2174,10 +2193,13 @@ function finishEditStat(modId, statIdx, input) {
   const mod = modules.find(m => m.id === modId);
   if (!mod) return;
   mod.stats[statIdx].val = newVal;
-  // Log weight for fitness module (statIdx 0 = current weight)
-  if (modId === 'fitness' && statIdx === 0) {
-    const today = new Date().toISOString().slice(0, 10);
-    logWeight(today, parseFloat(newVal));
+  // Log weight + rebuild chart for fitness module
+  if (modId === 'fitness') {
+    if (statIdx === 0) {
+      const today = fmtLocalDate(new Date());
+      logWeight(today, parseFloat(newVal));
+    }
+    rebuildFitnessChart();
   }
   recalcModuleProgress(mod);
   saveModules();
@@ -2232,6 +2254,7 @@ function recalcModuleProgress(mod) {
     const curW = parseFloat(mod.stats[0]?.val) || 0;
     const tgtW = parseFloat(mod.stats[1]?.val) || 0;
     mod.progress = (curW > 0 && tgtW > 0) ? Math.round(tgtW / curW * 100) : 0;
+    mod.chartTarget = tgtW;
     return;
   }
   // Account module: dynamic progressSuffix
