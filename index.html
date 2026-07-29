@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="zh-CN"><!-- v5-persistence-fix -->
+<html lang="zh-CN"><!-- v6-jobstore-fix -->
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
@@ -933,11 +933,6 @@ function openJobModal() {
     const location = document.getElementById('modalInput4').value.trim();
     if (!company || !position) { alert('请至少填写公司名称和职位名称'); return; }
     const store = getJobStore();
-    // Initialize store if empty
-    if (store.length === 0) {
-      const defaults = getDefaultJobStore();
-      saveJobStore(defaults);
-    }
     const newPos = {
       id: 'j' + Date.now(),
       company, position,
@@ -2335,7 +2330,7 @@ document.getElementById('avatarInput').addEventListener('change', handleAvatarUp
 loadAvatar();
 refreshEnglishModule();
 refreshNewsModule();
-if (getJobStore().length === 0) saveJobStore(getDefaultJobStore());
+if (localStorage.getItem('job_store') === null) saveJobStore(getDefaultJobStore());
 refreshJobStats();
 buildLeftPanel();
 calcWeeklySummary();
